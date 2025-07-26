@@ -6,7 +6,9 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from langchain.memory import ConversationBufferMemory
-
+import fitz          # PyMuPDF  – PDF parsing
+import base64        # encode images
+import tempfile      # save upload to disk for PyMuPDF
 
 # Load environment variables from .env file
 load_dotenv()
@@ -15,9 +17,20 @@ os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_PROJECT"] = "Java TA Chatbot"
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
-from langchain_openai import ChatOpenAI
-from langsmith import traceable
+# ------------------------------------------------------------------------Helper functions-----------------------------------------------------------------------------------
+def extract_pages(pdf_path):
+    """Extracts text + images from each page"""
+    doc = fitz.open(pdf_path)
+    page_data = []
 
+    for i, page in enumerate(doc):
+        text = page.get_text().strip()
+        pix = page.get_pixmap(dpi=100)
+        img_bytes = pix.tobytes("png")
+        base64_img = base64.b64encode(img_bytes).decode("utf-8")
+        page_data.append({"page": i + 1, "text": text, "image": base64_img})
+    return page_data
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 # Initialize LangChain memory
 if "memory" not in st.session_state:
@@ -27,9 +40,13 @@ if "memory" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+# Holds the concatenated plain-text of all PDFs the user has attached
+if "session_docs" not in st.session_state:
+    st.session_state.session_docs = ""
+
 
 @traceable(name="RAG_Chatbot_Answer")
-def rag_answer2(query, collection, memory, embedding_model="text-embedding-3-small", k=3):
+def rag_answer2(query, collection, memory, attachment_text="", embedding_model="text-embedding-3-small", k=3):
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # keep for embeddings
 
     # Step 1: Embed the user's question
@@ -47,6 +64,13 @@ def rag_answer2(query, collection, memory, embedding_model="text-embedding-3-sma
 
     # Step 3: Construct prompt
     context = "\n\n".join(relevant_chunks)
+
+    if attachment_text:           
+        context += (
+            "\n\n────────  📄 User Attachment  ────────\n\n"
+            + attachment_text.strip()
+        )
+
     full_prompt = f"""
     Previous Conversation:
         {memory_context}
@@ -250,6 +274,30 @@ collection = chroma_client.get_or_create_collection("knowledge-base6")
 st.title("💬 Knowledge Base Chatbot")
 st.markdown("Ask anything from the knowledge base below.")
 
+uploaded_file = st.file_uploader("📎 Attach a PDF", type=["pdf"])
+if uploaded_file:
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(uploaded_file.read())
+        tmp_path = tmp.name
+
+    pages = extract_pages(tmp_path)          # ← your helper
+    # --- NEW: build Markdown that interleaves text + the page image ----
+    pdf_blocks = []
+    for pg in pages:
+        txt = pg["text"].strip()
+        # img_md = f'![page-{pg["page"]}](data:image/png;base64,{pg["image"]})'
+        img_md = []
+        # keep both even if one is empty
+        pdf_blocks.append("\n\n".join(part for part in (txt, img_md) if part))
+
+    pdf_md = "\n\n".join(pdf_blocks)
+
+    # Store for the rest of the chat
+    st.session_state.session_docs += "\n\n" + pdf_md
+
+    st.success("PDF attached – text **and images** added to context ✅")
+
 # Render the full chat history (user + assistant messages)
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
@@ -266,7 +314,7 @@ if user_input:
 
     # Call your RAG function
     with st.spinner("Thinking..."):
-        response = rag_answer2(user_input, collection, memory=st.session_state.memory)
+        response = rag_answer2(user_input, collection, memory=st.session_state.memory, attachment_text=st.session_state.session_docs)
 
     # Add assistant message to memory and UI
     st.session_state.memory.chat_memory.add_ai_message(response)
