@@ -9,6 +9,9 @@ from langchain.memory import ConversationBufferMemory
 import fitz          # PyMuPDF  – PDF parsing
 import base64        # encode images
 import tempfile      # save upload to disk for PyMuPDF
+from PIL import Image
+import io
+import hashlib  # Add this import at the top
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,19 +21,189 @@ os.environ["LANGCHAIN_PROJECT"] = "Java TA Chatbot"
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
 # ------------------------------------------------------------------------Helper functions-----------------------------------------------------------------------------------
-def extract_pages(pdf_path):
-    """Extracts text + images from each page"""
+
+def detect_visual_elements(page):
+    """Detect if a page contains tables, diagrams, or other visual elements"""
+    # Check for tables
+    table_finder = page.find_tables()
+    tables = list(table_finder)  # Convert TableFinder to list
+    
+    # Check for images
+    images = page.get_images()
+    
+    # Check for drawings (vector graphics)
+    drawings = page.get_drawings()
+    # Simple heuristic: if text is sparse but there are visual elements, it's likely a diagram
+    text = page.get_text().strip()
+    text_density = len(text) / (page.rect.width * page.rect.height) if page.rect.width * page.rect.height > 0 else 0
+    
+    has_visual_content = len(tables) > 0 or len(images) > 0 or len(drawings) > 5 or text_density < 0.001
+    
+    return has_visual_content, len(tables), len(images), len(drawings)
+
+def extract_table_text(page):
+    """Extract tables as structured text"""
+    table_finder = page.find_tables()
+    tables = list(table_finder)  # Convert TableFinder to list
+    table_texts = []
+    
+    for table in tables:
+        try:
+            table_data = table.extract()
+            if table_data:
+                # Convert table to markdown format
+                markdown_table = "| " + " | ".join(str(cell) if cell else "" for cell in table_data[0]) + " |\n"
+                markdown_table += "|" + "---|" * len(table_data[0]) + "\n"
+                
+                for row in table_data[1:]:
+                    markdown_table += "| " + " | ".join(str(cell) if cell else "" for cell in row) + " |\n"
+                
+                table_texts.append(f"TABLE:\n{markdown_table}\n")
+        except:
+            continue
+    
+    return "\n".join(table_texts)
+
+def compress_image(pix, max_size=(800, 600), quality=85):
+    """Compress image to reduce token usage"""
+    img_bytes = pix.tobytes("png")
+    img = Image.open(io.BytesIO(img_bytes))
+    
+    # Resize if too large
+    img.thumbnail(max_size, Image.Resampling.LANCZOS)
+    
+    # Convert to RGB if necessary and save as JPEG for better compression
+    if img.mode in ('RGBA', 'LA', 'P'):
+        background = Image.new('RGB', img.size, (255, 255, 255))
+        if img.mode == 'P':
+            img = img.convert('RGBA')
+        background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+        img = background
+    
+    output = io.BytesIO()
+    img.save(output, format='JPEG', quality=quality, optimize=True)
+    return base64.b64encode(output.getvalue()).decode("utf-8")
+
+def analyze_visual_content_with_gpt4v(base64_image, client):
+    """Use GPT-4V to analyze visual content and convert to text description"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": """Analyze this image from a Java programming course document. Describe any:
+1. UML diagrams (class diagrams, sequence diagrams, etc.) - describe the classes, relationships, methods, and fields
+2. Code snippets or examples - transcribe the code exactly
+3. Flowcharts or algorithmic diagrams - describe the logic flow
+4. Tables with data - convert to markdown table format
+5. Mathematical formulas or expressions
+6. Any other educational content relevant to Java programming
+
+Be precise and detailed in your description so it can be used as context for answering student questions."""
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=1500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"[Error analyzing visual content: {str(e)}]"
+
+def extract_pages_optimized(pdf_path):
+    """Extracts text + analyzes visual content efficiently"""
     doc = fitz.open(pdf_path)
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     page_data = []
 
     for i, page in enumerate(doc):
         text = page.get_text().strip()
-        pix = page.get_pixmap(dpi=100)
-        img_bytes = pix.tobytes("png")
-        base64_img = base64.b64encode(img_bytes).decode("utf-8")
-        page_data.append({"page": i + 1, "text": text, "image": base64_img})
+        
+        # Extract tables as structured text
+        table_text = extract_table_text(page)
+        
+        # Check if page has significant visual content
+        has_visual, num_tables, num_images, num_drawings = detect_visual_elements(page)
+        
+        visual_description = ""
+        if has_visual and (num_images > 0 or num_drawings > 10 or (len(text) < 100 and num_drawings > 0)):
+            # Only process visual content for pages that likely contain diagrams/important visuals
+            pix = page.get_pixmap(dpi=150)  # Higher DPI for better OCR
+            compressed_img = compress_image(pix)
+            visual_description = analyze_visual_content_with_gpt4v(compressed_img, client)
+            
+            st.info(f"📊 Analyzed visual content on page {i+1}: {num_tables} tables, {num_images} images, {num_drawings} drawings")
+        
+        # Combine all content
+        combined_content = []
+        if text:
+            combined_content.append(f"TEXT CONTENT:\n{text}")
+        if table_text:
+            combined_content.append(f"STRUCTURED TABLES:\n{table_text}")
+        if visual_description:
+            combined_content.append(f"VISUAL ELEMENTS DESCRIPTION:\n{visual_description}")
+        
+        page_content = "\n\n".join(combined_content)
+        page_data.append({
+            "page": i + 1, 
+            "content": page_content,
+            "has_visuals": has_visual,
+            "stats": f"Tables: {num_tables}, Images: {num_images}, Drawings: {num_drawings}"
+        })
+    
     return page_data
-# ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+# Alternative: Smart chunking approach
+def smart_chunk_content(page_data, max_chunk_size=4000):
+    """Break content into smart chunks that respect logical boundaries"""
+    chunks = []
+    
+    for page in page_data:
+        content = page["content"]
+        page_num = page["page"]
+        
+        if len(content) <= max_chunk_size:
+            chunks.append({
+                "text": content,
+                "metadata": {"page": page_num, "chunk": 1}
+            })
+        else:
+            # Split by sections, preserving visual elements together
+            sections = content.split("\n\n")
+            current_chunk = ""
+            chunk_num = 1
+            
+            for section in sections:
+                if len(current_chunk) + len(section) + 2 <= max_chunk_size:
+                    current_chunk += section + "\n\n"
+                else:
+                    if current_chunk:
+                        chunks.append({
+                            "text": current_chunk.strip(),
+                            "metadata": {"page": page_num, "chunk": chunk_num}
+                        })
+                        chunk_num += 1
+                    current_chunk = section + "\n\n"
+            
+            if current_chunk:
+                chunks.append({
+                    "text": current_chunk.strip(),
+                    "metadata": {"page": page_num, "chunk": chunk_num}
+                })
+    
+    return chunks
+
+# ------------------------------------------------------------------------End Helper functions------------------------------------------------------------------------
 
 # Initialize LangChain memory
 if "memory" not in st.session_state:
@@ -40,14 +213,17 @@ if "memory" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Holds the concatenated plain-text of all PDFs the user has attached
+# Holds the processed content from PDFs
 if "session_docs" not in st.session_state:
     st.session_state.session_docs = ""
 
+# Stores metadata of processed files
+if "processed_files" not in st.session_state:
+    st.session_state.processed_files = []
 
 @traceable(name="RAG_Chatbot_Answer")
-def rag_answer2(query, collection, memory, attachment_text="", embedding_model="text-embedding-3-small", k=3):
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # keep for embeddings
+def rag_answer2(query, collection, memory, attachment_text="", embedding_model="text-embedding-3-small", k=5):
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     # Step 1: Embed the user's question
     query_embedding = client.embeddings.create(
@@ -55,11 +231,11 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
         model=embedding_model
     ).data[0].embedding
 
-    # Step 2: Retrieve top-k chunks from Chroma
+    # Step 2: Retrieve top-k chunks from Chroma (increased k since we're chunking better)
     results = collection.query(query_embeddings=[query_embedding], n_results=k)
     relevant_chunks = results["documents"][0]
 
-     # Get memory history as string
+    # Get memory history as string
     memory_context = memory.buffer
 
     # Step 3: Construct prompt
@@ -67,10 +243,11 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
 
     if attachment_text:           
         context += (
-            "\n\n────────  📄 User Attachment  ────────\n\n"
+            "\n\n────────  📄 User Attachment (Current Session)  ────────\n\n"
             + attachment_text.strip()
         )
 
+    # [Rest of your rag_answer2 function remains the same...]
     full_prompt = f"""
     Previous Conversation:
         {memory_context}
@@ -83,173 +260,10 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
         If the user asks you to generate **new teaching materials** (exam papers, quizzes, exercises, sample projects), you should **synthesize** them using the topics, code examples, and explanations from the context—even if no exact exam exists there.
         If the user explicitly asks you to draw or create a UML diagram, you may rely on the UML Diagrams (Usage Guidelines) section in this prompt—even though no UML lives in the context.
         Otherwise, use only the information found in the context. Do not invent APIs, methods, definitions, or facts.
-        You may reformat, rename, and adapt examples from the context to answer the user’s question.
-        Only if you’ve **tried both** factual lookup *and* generative synthesis (where allowed), **then** say:
-            “Sorry, I couldn’t find that in the course material I was given.” and follow up with some counter questions related to the user question to make the user help you understand their question better.
-        Do not include this apology if you’ve already answered the question or explained something from the context.
-        📋 Answer Format:
-        Brief Summary
-        A one- or two-line direct answer to the question.
-        Detailed Explanation
-        A clear and structured explanation using the terminology and style of the UCL course.
-        Java Code (if relevant)
-        Provide working and formatted code blocks in:
-        ```java
-        // Code with meaningful comments
-        public int square(int x) {
-            'return x * x;'
-        }
-        ```
-        Add comments or labels like // Constructor or // Method call example where helpful.
-        Edge Cases & Pitfalls
-        Briefly mention any exceptions, compiler warnings, gotchas, or common mistakes related to the topic.
-        Optional Extras (only if helpful)
-        ASCII-style diagrams for control flow, object relationships, or memory
-        Small tables (e.g., lifecycle states, type conversions)
-
-        🧩 📐 UML Diagrams (Usage Guidelines)
-        When a question involves object-oriented design, class structure, inheritance, interfaces, or relationships between multiple classes, you may include a simple UML diagram to illustrate the structure.
-        ✅ Use UML when:
-        A student asks about class relationships (e.g., "How do these classes relate?")
-        A concept involves inheritance, interfaces, composition, or abstract classes
-        You are explaining object-oriented design patterns (e.g., Strategy, Factory, etc.)
-        A student specifically asks you to create/draw a UML diagram
-        ✅ Format:
-        Use ASCII-style UML diagrams that clearly show class names, inheritance, fields, and methods
-        Keep diagrams minimal and clean — no need to use full UML syntax or notation
-        ✅ Examples:
-
-        Inheritance Relationship:
-        +----------------+
-        |    Animal      |
-        +----------------+
-        | - name: String |
-        +----------------+
-        | +speak(): void |
-        +----------------+
-                ▲
-                |
-        +----------------+
-        |     Dog        |
-        +----------------+
-        | +bark(): void  |
-        +----------------+
-
-        Interface Implementation:
-
-        +--------------------+
-        |   Flyable          |
-        +--------------------+
-        | +fly(): void       |
-        +--------------------+
-
-                ▲ implements
-                |
-        +----------------+
-        |     Bird       |
-        +----------------+
-        | - wings: int   |
-        | +fly(): void   |
-        +----------------+
-
-        Composition:
-
-        +-------------------+
-        |     House         |
-        +-------------------+
-        | - address: String |
-        +-------------------+
-        | +build(): void    |
-        +-------------------+
-                ◆
-                |
-        +-------------------+
-        |     Room          |
-        +-------------------+
-        | - size: int       |
-        +-------------------+
-
-        Big UML Diagram Example:
-
-                                ┌──────────────────────────┐
-                                │        Employee          │
-                                ├──────────────────────────┤
-                                │ - name        : String   │
-                                │ - department  : String   │
-                                │ - monthlyPay  : int      │
-                                ├──────────────────────────┤
-                                │ +String getName()        │
-                                │ +String getDepartment()  │
-                                │ +int    getMonthlyPay()  │
-                                └──────────────────────────┘
-                                        ▲
-                        ┌──────────────────┴──────────────────┐
-                        │                                     │
-            ┌──────────────────────────┐        ┌──────────────────────────┐
-            │         Manager          │        │          Worker          │
-            ├──────────────────────────┤        ├──────────────────────────┤
-            │ - bonus        : int     │        │ (no extra fields)        │
-            ├──────────────────────────┤        ├──────────────────────────┤
-            │ +int getMonthlyPay()     │        │                          │
-            └──────────────────────────┘        └──────────────────────────┘
-                        ▲ 0..* (managed by ExecutiveTeam)
-                        │
-                        │
-                        │               1
-                ┌──────────────────────────┴──────────────────────────┐
-                │                   ExecutiveTeam                     │
-                ├──────────────────────────────────────────────────────┤
-                │ +void add(Manager manager)                          │
-                │ +void remove(String name)                           │
-                └──────────────────────────────────────────────────────┘
-                        ▲ 1 (created/owned by Company)
-                        │
-                        │
-                        │
-        ┌───────────────────────────────────────────────────────────────┐
-        │                           Company                            │
-        ├───────────────────────────────────────────────────────────────┤
-        │ - name : String                                               │
-        ├───────────────────────────────────────────────────────────────┤
-        │ +void addWorker(String name, String department, int pay)      │
-        │ +void addManager(String name, String department, int pay,     │
-        │                      int bonus)                               │
-        │ +void addToExecutiveTeam(Manager manager)                     │
-        │ +int  getTotalPayPerMonth()                                   │
-        └───────────────────────────────────────────────────────────────┘
-                        | 1
-                        | has
-                        | 0..*
-                        ▼
-                ┌──────────────────────────┐
-                │        Employee          │  (same box as above; association shown here)
-                └──────────────────────────┘
-
-        ✅ Explain the diagram in words:
-        “In this example, Dog inherits from Animal. The base class provides the speak() method, and Dog adds a new method bark().”
-        ❌ Don’t use UML for simple method questions or unrelated procedural logic.
-
-        Mini Quiz (optional)
-        Occasionally include a short quiz question to reinforce learning (e.g., “What would happen if the return type was void?”). Include answers at the end.
-        ✏️ Formatting Rules:
-        Use correct Java identifier formatting (e.g., MyClass, toString(), ArrayList<Integer>)
-        Use bullet points or subheadings where clarity improves
-        Do not include material or Java APIs not explicitly referenced in the context
-        ⚠️ Handling Common Cases:
-        If the user question is too vague, explain a general case using course-relevant examples (e.g., square(int x) or sayHello()).
-        If multiple interpretations of a question are possible, briefly list the plausible ones and address each.
-        If the question mentions a Java keyword (e.g., final, static, record), define it precisely and relate it to context.
-        If the question is about bugs, compilation errors, or design, point to patterns, methods, or design tips from the context material.
-        🎓 Teaching Style:
-        Be professional, supportive, and clear — like a trusted lab demonstrator or tutor.
-        Prioritize conceptual clarity over fancy language.
-        Avoid filler. Never speculate.
-        Structure your answer to help students understand, not just memorize.
-        🧠 Self-Check Before Answering:
-        Ask yourself: 1. "If it is a UML diagram, use examples in your prompt and answer."
-                    2. “Else, can I find any relevant example, definition, or code in the context or the prompt that helps answer this question?”
-        If yes, adapt and use it.
-        If no, say: “Sorry, I couldn’t find that in the course material I was given.” and follow up with some counter questions related to the user question to make the user help you understand their question better.
+        You may reformat, rename, and adapt examples from the context to answer the user's question.
+        Only if you've **tried both** factual lookup *and* generative synthesis (where allowed), **then** say:
+            "Sorry, I couldn't find that in the course material I was given." and follow up with some counter questions related to the user question to make the user help you understand their question better.
+        Do not include this apology if you've already answered the question or explained something from the context.
 
         Context:
         {context}
@@ -260,7 +274,6 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
         Answer:
         """
 
-    # Step 4: LangSmith-traceable LLM call
     llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
     response = llm.invoke(full_prompt)
 
@@ -275,28 +288,110 @@ st.title("💬 Knowledge Base Chatbot")
 st.markdown("Ask anything from the knowledge base below.")
 
 uploaded_file = st.file_uploader("📎 Attach a PDF", type=["pdf"])
-if uploaded_file:
-    import tempfile
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(uploaded_file.read())
-        tmp_path = tmp.name
 
-    pages = extract_pages(tmp_path)          # ← your helper
-    # --- NEW: build Markdown that interleaves text + the page image ----
-    pdf_blocks = []
-    for pg in pages:
-        txt = pg["text"].strip()
-        # img_md = f'![page-{pg["page"]}](data:image/png;base64,{pg["image"]})'
-        img_md = []
-        # keep both even if one is empty
-        pdf_blocks.append("\n\n".join(part for part in (txt, img_md) if part))
+# Only process when a file is actually uploaded
+if uploaded_file is not None:
+    # Calculate file hash for duplicate detection
+    file_content = uploaded_file.read()
+    file_hash = hashlib.sha256(file_content).hexdigest()
+    uploaded_file.seek(0)  # Reset file pointer
+    
+    # Check if this specific file upload is new (using a session state key)
+    current_file_key = f"{uploaded_file.name}_{file_hash}"
+    
+    # Only show duplicate warning or process if this is a new file interaction
+    if "last_processed_file" not in st.session_state:
+        st.session_state.last_processed_file = None
+    
+    # Check if this is the same file upload as before (to prevent re-processing on page refresh)
+    if st.session_state.last_processed_file != current_file_key:
+        # Check if already processed in this session
+        already_processed = any(f["hash"] == file_hash for f in st.session_state.processed_files)
+        
+        if not already_processed:
+            # Add to processed files list
+            st.session_state.processed_files.append({
+                "name": uploaded_file.name,
+                "hash": file_hash,
+                "size": uploaded_file.size
+            })
+            
+            # Update the last processed file
+            st.session_state.last_processed_file = current_file_key
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(uploaded_file.read())
+                tmp_path = tmp.name
+                
+            with st.spinner("🔍 Processing PDF with smart visual analysis..."):
+                # Use the optimized extraction
+                pages = extract_pages_optimized(tmp_path)
+                
+                # Create chunks for better context management
+                chunks = smart_chunk_content(pages)
+                
+                # Combine all content for the session
+                all_content = []
+                for chunk in chunks:
+                    content_with_meta = f"[Page {chunk['metadata']['page']}, Chunk {chunk['metadata']['chunk']}]\n{chunk['text']}"
+                    all_content.append(content_with_meta)
+                
+                combined_content = "\n\n".join(all_content)
+                
+                st.session_state.session_docs += "\n\n" + combined_content
+                
+                # Show processing stats
+                total_pages = len(pages)
+                pages_with_visuals = sum(1 for p in pages if p["has_visuals"])
+                
+                st.success(f"""PDF processed successfully! ✅
+                
+        **Processing Summary:**
+        - 📄 **{total_pages} pages** processed
+        - 🎨 **{pages_with_visuals} pages** contained visual elements (diagrams, tables, etc.)
+        - 📊 **{len(chunks)} content chunks** created for optimal context retrieval
+                
+        Visual content has been analyzed and converted to text descriptions that preserve the meaning of diagrams, tables, and other non-text elements.""")
+        
+        else:
+            # Only show this warning for new duplicate uploads
+            st.session_state.last_processed_file = current_file_key
+            st.warning(f"⚠️ File '{uploaded_file.name}' has already been processed in this session!")
+            
+            # Optional: Show reprocess button
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Process anyway", key="reprocess_btn"):
+                    # Remove from processed list and reset
+                    st.session_state.processed_files = [
+                        f for f in st.session_state.processed_files 
+                        if f["hash"] != file_hash
+                    ]
+                    st.session_state.last_processed_file = None
+                    st.rerun()
+            
+            with col2:
+                if st.button("📋 Show processed files", key="show_files_btn"):
+                    st.session_state.show_processed_files = True
 
-    pdf_md = "\n\n".join(pdf_blocks)
-
-    # Store for the rest of the chat
-    st.session_state.session_docs += "\n\n" + pdf_md
-
-    st.success("PDF attached – text **and images** added to context ✅")
+# Optional: Show processed files section
+if st.session_state.get("show_processed_files", False):
+    st.subheader("📁 Processed Files in This Session")
+    
+    if st.session_state.processed_files:
+        for i, file_info in enumerate(st.session_state.processed_files):
+            with st.expander(f"📄 {file_info['name']} ({file_info['size']:,} bytes)"):
+                st.write(f"**File Hash:** `{file_info['hash'][:16]}...`")
+                
+                if st.button(f"🗑️ Remove from session", key=f"remove_{i}"):
+                    st.session_state.processed_files.pop(i)
+                    st.rerun()
+    else:
+        st.info("No files processed yet.")
+    
+    if st.button("✖️ Hide processed files"):
+        st.session_state.show_processed_files = False
+        st.rerun()
 
 # Render the full chat history (user + assistant messages)
 for msg in st.session_state.chat_history:
