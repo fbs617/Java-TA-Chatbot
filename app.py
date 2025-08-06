@@ -11,7 +11,7 @@ import base64        # encode images
 import tempfile      # save upload to disk for PyMuPDF
 from PIL import Image
 import io
-import hashlib  # Add this import at the top
+import hashlib 
 
 # Load environment variables from .env file
 load_dotenv()
@@ -19,6 +19,153 @@ load_dotenv()
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_PROJECT"] = "Java TA Chatbot"
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
+
+st.set_page_config(
+    page_title="Java TA Knowledge-Base Bot",
+    page_icon="☕️",
+    layout="wide",
+)
+
+st.markdown("""
+<style>
+  :root {
+    --java-blue:   #5382a1;
+    --java-orange: #e76f00;
+    --java-cream:  #fdfaf6;
+    --accent-green: #28a745; /* New: Green accent for success/buttons */
+    --accent-red: #dc3545;   /* New: Red accent for warnings/errors */
+    --light-blue-bubble: #E2ECFF; /* User bubble background */
+    --dark-blue-text: #102A43;    /* User bubble text */
+    --light-grey-bg: #F0F6FF;     /* Code block background */
+    --dark-blue-code: #1E3A8A;    /* Code text */
+  }
+  body {
+    background: linear-gradient(135deg, var(--java-blue) 0%, var(--java-orange) 120%);
+    background-attachment: fixed;
+  }
+  /* make the white “card” readable */
+  section.main > div:first-child {
+    background: var(--java-cream) !important;
+    border-radius: 1rem !important;
+    padding: 2rem !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08) !important;
+  }
+
+  /* chat bubbles override */
+  div.stChatMessage.stChatMessage--user > div {
+    background: var(--light-blue-bubble) !important;
+    color: var(--dark-blue-text) !important;
+    padding: 0.75rem 1rem !important;
+    border-radius: 12px !important;
+    margin: 0.5rem 0 !important;
+    max-width: 70% !important;
+    margin-left: auto !important;
+  }
+  div.stChatMessage.stChatMessage--assistant > div {
+    background: #FFFFFF !important;
+    color: #243B53 !important;
+    padding: 0.75rem 1rem !important;
+    border-radius: 12px !important;
+    margin: 0.5rem 0 !important;
+    max-width: 70% !important;
+    margin-right: auto !important;
+  }
+  .stChatMessage__avatar { display: none !important; }
+
+  /* code highlighting */
+  code, pre {
+    font-family: 'JetBrains Mono', monospace !important;
+    background: var(--light-grey-bg) !important;
+    color: var(--dark-blue-code) !important;
+    border-radius: 8px !important;
+  }
+  pre {
+    padding: 1rem !important;
+    overflow-x: auto !important;
+  }
+  code {
+    padding: 0.15rem 0.35rem !important;
+  }
+
+  /* file cards */
+  .file-card {
+    background: #FFFFFF;
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 12px;
+    padding: 1rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    margin-bottom: 0.75rem;
+    border-left: 5px solid var(--java-orange); /* New: Colored border */
+  }
+
+  div.stButton > button {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white !important;
+  border-radius: 0.75rem;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
+    }
+
+    div.stButton > button:hover {
+    background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%) !important;
+    color: white !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
+    }
+
+    div.stButton > button:active {
+    background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%) !important;
+    color: white !important;
+    transform: translateY(0);
+    box-shadow: 0 2px 10px rgba(102, 126, 234, 0.2);
+    }
+
+    div.stButton > button:focus {
+    background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%) !important;
+    color: white !important;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
+    }
+
+  /* Warnings */
+  .stAlert.stAlert--warning {
+      background-color: #fff3cd !important;
+      color: #856404 !important;
+      border-color: #ffeeba !important;
+  }
+
+  /* Info */
+  .stAlert.stAlert--info {
+      background-color: #d1ecf1 !important;
+      color: #0c5460 !important;
+      border-color: #bee5eb !important;
+  }
+
+  /* Success */
+  .stAlert.stAlert--success {
+      background-color: #d4edda !important;
+      color: #155724 !important;
+      border-color: #c3e6cb !important;
+  }
+
+</style>
+""", unsafe_allow_html=True)
+
+# Friendly hero banner  (main column, before chat)
+st.markdown("""
+<div style="margin-top:-20px">
+<h1 style="font-size:2.3rem">🧑‍🏫 Java TA Chatbot</h1>
+<p style="font-size:1.05rem">
+Ask me anything about <strong>Java, OOP, UML, data structures, JVM internals</strong>—
+Try e.g.:
+<em>“Explain polymorphism in Java.”</em>
+</p>
+</div>
+""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------------Helper functions-----------------------------------------------------------------------------------
 
@@ -247,7 +394,6 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
             + attachment_text.strip()
         )
 
-    # [Rest of your rag_answer2 function remains the same...]
     full_prompt = f"""
     Previous Conversation:
         {memory_context}
@@ -260,10 +406,173 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
         If the user asks you to generate **new teaching materials** (exam papers, quizzes, exercises, sample projects), you should **synthesize** them using the topics, code examples, and explanations from the context—even if no exact exam exists there.
         If the user explicitly asks you to draw or create a UML diagram, you may rely on the UML Diagrams (Usage Guidelines) section in this prompt—even though no UML lives in the context.
         Otherwise, use only the information found in the context. Do not invent APIs, methods, definitions, or facts.
-        You may reformat, rename, and adapt examples from the context to answer the user's question.
-        Only if you've **tried both** factual lookup *and* generative synthesis (where allowed), **then** say:
-            "Sorry, I couldn't find that in the course material I was given." and follow up with some counter questions related to the user question to make the user help you understand their question better.
-        Do not include this apology if you've already answered the question or explained something from the context.
+        You may reformat, rename, and adapt examples from the context to answer the user’s question.
+        Only if you’ve **tried both** factual lookup *and* generative synthesis (where allowed), **then** say:
+            “Sorry, I couldn’t find that in the course material I was given.” and follow up with some counter questions related to the user question to make the user help you understand their question better.
+        Do not include this apology if you’ve already answered the question or explained something from the context.
+        📋 Answer Format:
+        Brief Summary
+        A one- or two-line direct answer to the question.
+        Detailed Explanation
+        A clear and structured explanation using the terminology and style of the UCL course.
+        Java Code (if relevant)
+        Provide working and formatted code blocks in:
+        ```java
+        // Code with meaningful comments
+        public int square(int x) {
+            'return x * x;'
+        }
+        ```
+        Add comments or labels like // Constructor or // Method call example where helpful.
+        Edge Cases & Pitfalls
+        Briefly mention any exceptions, compiler warnings, gotchas, or common mistakes related to the topic.
+        Optional Extras (only if helpful)
+        ASCII-style diagrams for control flow, object relationships, or memory
+        Small tables (e.g., lifecycle states, type conversions)
+
+        🧩 📐 UML Diagrams (Usage Guidelines)
+        When a question involves object-oriented design, class structure, inheritance, interfaces, or relationships between multiple classes, you may include a simple UML diagram to illustrate the structure.
+        ✅ Use UML when:
+        A student asks about class relationships (e.g., "How do these classes relate?")
+        A concept involves inheritance, interfaces, composition, or abstract classes
+        You are explaining object-oriented design patterns (e.g., Strategy, Factory, etc.)
+        A student specifically asks you to create/draw a UML diagram
+        ✅ Format:
+        Use ASCII-style UML diagrams that clearly show class names, inheritance, fields, and methods
+        Keep diagrams minimal and clean — no need to use full UML syntax or notation
+        ✅ Examples:
+
+        Inheritance Relationship:
+        +----------------+
+        |    Animal      |
+        +----------------+
+        | - name: String |
+        +----------------+
+        | +speak(): void |
+        +----------------+
+                ▲
+                |
+        +----------------+
+        |     Dog        |
+        +----------------+
+        | +bark(): void  |
+        +----------------+
+
+        Interface Implementation:
+
+        +--------------------+
+        |   Flyable          |
+        +--------------------+
+        | +fly(): void       |
+        +--------------------+
+
+                ▲ implements
+                |
+        +----------------+
+        |     Bird       |
+        +----------------+
+        | - wings: int   |
+        | +fly(): void   |
+        +----------------+
+
+        Composition:
+
+        +-------------------+
+        |     House         |
+        +-------------------+
+        | - address: String |
+        +-------------------+
+        | +build(): void    |
+        +-------------------+
+                ◆
+                |
+        +-------------------+
+        |     Room          |
+        +-------------------+
+        | - size: int       |
+        +-------------------+
+
+        Big UML Diagram Example:
+
+                                ┌──────────────────────────┐
+                                │        Employee          │
+                                ├──────────────────────────┤
+                                │ - name        : String   │
+                                │ - department  : String   │
+                                │ - monthlyPay  : int      │
+                                ├──────────────────────────┤
+                                │ +String getName()        │
+                                │ +String getDepartment()  │
+                                │ +int    getMonthlyPay()  │
+                                └──────────────────────────┘
+                                        ▲
+                        ┌──────────────────┴──────────────────┐
+                        │                                     │
+            ┌──────────────────────────┐        ┌──────────────────────────┐
+            │         Manager          │        │          Worker          │
+            ├──────────────────────────┤        ├──────────────────────────┤
+            │ - bonus        : int     │        │ (no extra fields)        │
+            ├──────────────────────────┤        ├──────────────────────────┤
+            │ +int getMonthlyPay()     │        │                          │
+            └──────────────────────────┘        └──────────────────────────┘
+                        ▲ 0..* (managed by ExecutiveTeam)
+                        │
+                        │
+                        │               1
+                ┌──────────────────────────┴──────────────────────────┐
+                │                   ExecutiveTeam                     │
+                ├──────────────────────────────────────────────────────┤
+                │ +void add(Manager manager)                          │
+                │ +void remove(String name)                           │
+                └──────────────────────────────────────────────────────┘
+                        ▲ 1 (created/owned by Company)
+                        │
+                        │
+                        │
+        ┌───────────────────────────────────────────────────────────────┐
+        │                           Company                            │
+        ├───────────────────────────────────────────────────────────────┤
+        │ - name : String                                               │
+        ├───────────────────────────────────────────────────────────────┤
+        │ +void addWorker(String name, String department, int pay)      │
+        │ +void addManager(String name, String department, int pay,     │
+        │                      int bonus)                               │
+        │ +void addToExecutiveTeam(Manager manager)                     │
+        │ +int  getTotalPayPerMonth()                                   │
+        └───────────────────────────────────────────────────────────────┘
+                        | 1
+                        | has
+                        | 0..*
+                        ▼
+                ┌──────────────────────────┐
+                │        Employee          │  (same box as above; association shown here)
+                └──────────────────────────┘
+
+        ✅ Explain the diagram in words:
+        “In this example, Dog inherits from Animal. The base class provides the speak() method, and Dog adds a new method bark().”
+        ❌ Don’t use UML for simple method questions or unrelated procedural logic.
+
+        Mini Quiz (optional)
+        Occasionally include a short quiz question to reinforce learning (e.g., “What would happen if the return type was void?”). Include answers at the end.
+        ✏️ Formatting Rules:
+        Use correct Java identifier formatting (e.g., MyClass, toString(), ArrayList<Integer>)
+        Use bullet points or subheadings where clarity improves
+        Do not include material or Java APIs not explicitly referenced in the context
+        ⚠️ Handling Common Cases:
+        If the user question is too vague, explain a general case using course-relevant examples (e.g., square(int x) or sayHello()).
+        If multiple interpretations of a question are possible, briefly list the plausible ones and address each.
+        If the question mentions a Java keyword (e.g., final, static, record), define it precisely and relate it to context.
+        If the question is about bugs, compilation errors, or design, point to patterns, methods, or design tips from the context material.
+        🎓 Teaching Style:
+        Be professional, supportive, and clear — like a trusted lab demonstrator or tutor.
+        Prioritize conceptual clarity over fancy language.
+        Avoid filler. Never speculate.
+        Structure your answer to help students understand, not just memorize.
+        🧠 Self-Check Before Answering:
+        Ask yourself: 1. "If it is a UML diagram, use examples in your prompt and answer."
+                    2. “Else, can I find any relevant example, definition, or code in the context or the prompt that helps answer this question?”
+        If yes, adapt and use it.
+        If no, say: “Sorry, I couldn’t find that in the course material I was given.” and follow up with some counter questions related to the user question to make the user help you understand their question better.
 
         Context:
         {context}
@@ -283,11 +592,27 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection("knowledge-base6")
 
-# Streamlit app layout
-st.title("💬 Knowledge Base Chatbot")
-st.markdown("Ask anything from the knowledge base below.")
+# uploaded_file = st.file_uploader("📎 Attach a PDF", type=["pdf"])
+with st.sidebar:
+    st.header("📎 Upload a PDF")
+    uploaded_file = st.file_uploader("Choose a Java/OOP PDF", type=["pdf"])
+    st.markdown("---")
+    st.caption("🔹 Diagrams & tables auto-extracted 🔹")
+    st.markdown("---")
+    st.header("⚡ Quick Actions")
+    if st.button("Explain Inheritance"):
+        st.session_state.quick = "Explain inheritance in Java"
+    if st.button("Show UML Example"):
+        st.session_state.quick = "Give me a UML class diagram example in Java"
+    if st.button("List OOP Principles"):
+        st.session_state.quick = "What are the four main OOP principles in Java?"
 
-uploaded_file = st.file_uploader("📎 Attach a PDF", type=["pdf"])
+if "quick" in st.session_state:
+    # use the quick action text and then clear it
+    user_input = st.session_state.pop("quick")
+else:
+    user_input = st.chat_input("Ask me anything…")
+
 
 # Only process when a file is actually uploaded
 if uploaded_file is not None:
@@ -375,31 +700,46 @@ if uploaded_file is not None:
                     st.session_state.show_processed_files = True
 
 # Optional: Show processed files section
+# ------------------------------------------------------------------
+# ⇨ MOD ❼  Processed-files section: use tabs & card style
+# ------------------------------------------------------------------
+files_tab, about_tab = st.tabs(["📁 Processed Files", "ℹ️ About"])
+
 if st.session_state.get("show_processed_files", False):
-    st.subheader("📁 Processed Files in This Session")
-    
-    if st.session_state.processed_files:
-        for i, file_info in enumerate(st.session_state.processed_files):
-            with st.expander(f"📄 {file_info['name']} ({file_info['size']:,} bytes)"):
-                st.write(f"**File Hash:** `{file_info['hash'][:16]}...`")
-                
-                if st.button(f"🗑️ Remove from session", key=f"remove_{i}"):
-                    st.session_state.processed_files.pop(i)
-                    st.rerun()
-    else:
-        st.info("No files processed yet.")
+    with files_tab:
+        if st.session_state.processed_files:
+            for i, file_info in enumerate(st.session_state.processed_files):
+                with st.container():
+                    st.markdown(f"<div class='file-card'>"
+                                f"<strong>{file_info['name']}</strong> "
+                                f"({file_info['size']:,} bytes)"
+                                f"<br><code>{file_info['hash'][:16]}…</code>"
+                                "</div>", unsafe_allow_html=True)
+        else:
+            st.info("No files processed yet.")
     
     if st.button("✖️ Hide processed files"):
         st.session_state.show_processed_files = False
         st.rerun()
 
+with about_tab:
+    st.markdown("""
+    **Java TA Bot** leverages LangChain, GPT-4o, and ChromaDB to provide
+    accurate answers based on your course PDFs.
+    """)
+
 # Render the full chat history (user + assistant messages)
+# ------------------------------------------------------------------
+# ⇨ MOD ❻  Chat message rendering uses CSS classes
+# ------------------------------------------------------------------
 for msg in st.session_state.chat_history:
+    role_class = "user-msg" if msg["role"] == "user" else "bot-msg"
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        st.markdown(f"<div class='{role_class}'>{msg['content']}</div>",
+                    unsafe_allow_html=True)
 
 # Chat-style input field
-user_input = st.chat_input("Ask me anything...")
+# user_input = st.chat_input("Ask me anything...")
 
 # Process the user's question
 if user_input:
