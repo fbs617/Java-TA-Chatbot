@@ -6,14 +6,14 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 from langchain.memory import ConversationBufferMemory
-import fitz          # PyMuPDF  – PDF parsing
-import base64        # encode images
-import tempfile      # save upload to disk for PyMuPDF
+import fitz          # PyMuPDF for PDF parsing
+import base64        # Image encoding
+import tempfile      # Save uploads for PyMuPDF
 from PIL import Image
 import io
 import hashlib 
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
@@ -155,7 +155,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Friendly hero banner  (main column, before chat)
+# Hero banner (main column, before chat)
 st.markdown("""
 <div style="margin-top:-20px">
 <h1 style="font-size:2.3rem">🧑‍🏫 Java TA Chatbot</h1>
@@ -171,16 +171,16 @@ Try e.g.:
 
 def detect_visual_elements(page):
     """Detect if a page contains tables, diagrams, or other visual elements"""
-    # Check for tables
+    # Look for tables
     table_finder = page.find_tables()
-    tables = list(table_finder)  # Convert TableFinder to list
+    tables = list(table_finder)  # Convert TableFinder to a list
     
-    # Check for images
+    # Look for images
     images = page.get_images()
     
-    # Check for drawings (vector graphics)
+    # Look for vector drawings
     drawings = page.get_drawings()
-    # Simple heuristic: if text is sparse but there are visual elements, it's likely a diagram
+    # Heuristic: sparse text plus visuals likely indicates a diagram
     text = page.get_text().strip()
     text_density = len(text) / (page.rect.width * page.rect.height) if page.rect.width * page.rect.height > 0 else 0
     
@@ -191,14 +191,14 @@ def detect_visual_elements(page):
 def extract_table_text(page):
     """Extract tables as structured text"""
     table_finder = page.find_tables()
-    tables = list(table_finder)  # Convert TableFinder to list
+    tables = list(table_finder)  # Convert TableFinder to a list
     table_texts = []
     
     for table in tables:
         try:
             table_data = table.extract()
             if table_data:
-                # Convert table to markdown format
+                # Render table as Markdown
                 markdown_table = "| " + " | ".join(str(cell) if cell else "" for cell in table_data[0]) + " |\n"
                 markdown_table += "|" + "---|" * len(table_data[0]) + "\n"
                 
@@ -216,10 +216,10 @@ def compress_image(pix, max_size=(800, 600), quality=85):
     img_bytes = pix.tobytes("png")
     img = Image.open(io.BytesIO(img_bytes))
     
-    # Resize if too large
+    # Resize if the image is large
     img.thumbnail(max_size, Image.Resampling.LANCZOS)
     
-    # Convert to RGB if necessary and save as JPEG for better compression
+    # Convert to RGB if needed, then save as JPEG for better compression
     if img.mode in ('RGBA', 'LA', 'P'):
         background = Image.new('RGB', img.size, (255, 255, 255))
         if img.mode == 'P':
@@ -279,19 +279,19 @@ def extract_pages_optimized(pdf_path):
         # Extract tables as structured text
         table_text = extract_table_text(page)
         
-        # Check if page has significant visual content
+        # Check for significant visual content
         has_visual, num_tables, num_images, num_drawings = detect_visual_elements(page)
         
         visual_description = ""
         if has_visual and (num_images > 0 or num_drawings > 10 or (len(text) < 100 and num_drawings > 0)):
-            # Only process visual content for pages that likely contain diagrams/important visuals
-            pix = page.get_pixmap(dpi=150)  # Higher DPI for better OCR
+            # Only process visuals for pages likely to contain diagrams
+            pix = page.get_pixmap(dpi=150)  # Higher DPI improves OCR
             compressed_img = compress_image(pix)
             visual_description = analyze_visual_content_with_gpt4v(compressed_img, client)
             
             st.info(f"📊 Analyzed visual content on page {i+1}: {num_tables} tables, {num_images} images, {num_drawings} drawings")
         
-        # Combine all content
+        # Combine content
         combined_content = []
         if text:
             combined_content.append(f"TEXT CONTENT:\n{text}")
@@ -310,7 +310,7 @@ def extract_pages_optimized(pdf_path):
     
     return page_data
 
-# Alternative: Smart chunking approach
+# Alternative: smart chunking
 def smart_chunk_content(page_data, max_chunk_size=4000):
     """Break content into smart chunks that respect logical boundaries"""
     chunks = []
@@ -325,7 +325,7 @@ def smart_chunk_content(page_data, max_chunk_size=4000):
                 "metadata": {"page": page_num, "chunk": 1}
             })
         else:
-            # Split by sections, preserving visual elements together
+            # Split by sections; keep visual elements together
             sections = content.split("\n\n")
             current_chunk = ""
             chunk_num = 1
@@ -352,19 +352,19 @@ def smart_chunk_content(page_data, max_chunk_size=4000):
 
 # ------------------------------------------------------------------------End Helper functions------------------------------------------------------------------------
 
-# Initialize LangChain memory
+# Initialize conversation memory
 if "memory" not in st.session_state:
     st.session_state.memory = ConversationBufferMemory(return_messages=True)
 
-# Initialize Streamlit frontend chat history
+# Initialize chat history (UI)
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Holds the processed content from PDFs
+# Store processed PDF content
 if "session_docs" not in st.session_state:
     st.session_state.session_docs = ""
 
-# Stores metadata of processed files
+# Store processed file metadata
 if "processed_files" not in st.session_state:
     st.session_state.processed_files = []
 
@@ -588,7 +588,7 @@ def rag_answer2(query, collection, memory, attachment_text="", embedding_model="
 
     return response.content
 
-# Initialize ChromaDB client and collection
+# Initialize ChromaDB and collection
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection("knowledge-base6")
 
@@ -608,40 +608,40 @@ with st.sidebar:
         st.session_state.quick = "What are the four main OOP principles in Java?"
 
 if "quick" in st.session_state:
-    # use the quick action text and then clear it
+    # Use the quick action text, then clear it
     user_input = st.session_state.pop("quick")
 else:
     user_input = st.chat_input("Ask me anything…")
 
 
-# Only process when a file is actually uploaded
+# Process only when a file is uploaded
 if uploaded_file is not None:
-    # Calculate file hash for duplicate detection
+    # Compute file hash to detect duplicates
     file_content = uploaded_file.read()
     file_hash = hashlib.sha256(file_content).hexdigest()
     uploaded_file.seek(0)  # Reset file pointer
     
-    # Check if this specific file upload is new (using a session state key)
+    # Track the current upload with a session key
     current_file_key = f"{uploaded_file.name}_{file_hash}"
     
-    # Only show duplicate warning or process if this is a new file interaction
+    # Only warn or process on a new upload
     if "last_processed_file" not in st.session_state:
         st.session_state.last_processed_file = None
     
-    # Check if this is the same file upload as before (to prevent re-processing on page refresh)
+    # Skip re-processing the same upload on refresh
     if st.session_state.last_processed_file != current_file_key:
-        # Check if already processed in this session
+        # Check if already processed this session
         already_processed = any(f["hash"] == file_hash for f in st.session_state.processed_files)
         
         if not already_processed:
-            # Add to processed files list
+            # Add to processed files
             st.session_state.processed_files.append({
                 "name": uploaded_file.name,
                 "hash": file_hash,
                 "size": uploaded_file.size
             })
             
-            # Update the last processed file
+            # Update the last processed file marker
             st.session_state.last_processed_file = current_file_key
             
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -649,13 +649,13 @@ if uploaded_file is not None:
                 tmp_path = tmp.name
                 
             with st.spinner("🔍 Processing PDF with smart visual analysis..."):
-                # Use the optimized extraction
+                # Run optimized extraction
                 pages = extract_pages_optimized(tmp_path)
                 
-                # Create chunks for better context management
+                # Chunk content for retrieval
                 chunks = smart_chunk_content(pages)
                 
-                # Combine all content for the session
+                # Combine chunk text for this session
                 all_content = []
                 for chunk in chunks:
                     content_with_meta = f"[Page {chunk['metadata']['page']}, Chunk {chunk['metadata']['chunk']}]\n{chunk['text']}"
@@ -679,11 +679,11 @@ if uploaded_file is not None:
         Visual content has been analyzed and converted to text descriptions that preserve the meaning of diagrams, tables, and other non-text elements.""")
         
         else:
-            # Only show this warning for new duplicate uploads
+            # Warn only for new duplicate uploads
             st.session_state.last_processed_file = current_file_key
             st.warning(f"⚠️ File '{uploaded_file.name}' has already been processed in this session!")
             
-            # Optional: Show reprocess button
+            # Provide a reprocess option
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("🔄 Process anyway", key="reprocess_btn"):
@@ -699,60 +699,55 @@ if uploaded_file is not None:
                 if st.button("📋 Show processed files", key="show_files_btn"):
                     st.session_state.show_processed_files = True
 
-# Optional: Show processed files section
-# ------------------------------------------------------------------
-# ⇨ MOD ❼  Processed-files section: use tabs & card style
-# ------------------------------------------------------------------
-files_tab, about_tab = st.tabs(["📁 Processed Files", "ℹ️ About"])
+# Processed files section (tabs + card style)
 
-if st.session_state.get("show_processed_files", False):
-    with files_tab:
-        if st.session_state.processed_files:
-            for i, file_info in enumerate(st.session_state.processed_files):
-                with st.container():
-                    st.markdown(f"<div class='file-card'>"
-                                f"<strong>{file_info['name']}</strong> "
-                                f"({file_info['size']:,} bytes)"
-                                f"<br><code>{file_info['hash'][:16]}…</code>"
-                                "</div>", unsafe_allow_html=True)
-        else:
-            st.info("No files processed yet.")
-    
-    if st.button("✖️ Hide processed files"):
-        st.session_state.show_processed_files = False
-        st.rerun()
+# if st.session_state.get("show_processed_files", False):
+# files_tab, about_tab = st.tabs(["📁 Processed Files", "ℹ️ About"])
+# with files_tab:
+#     if st.session_state.processed_files:
+#         for i, file_info in enumerate(st.session_state.processed_files):
+#             with st.container():
+#                 st.markdown(f"<div class='file-card'>"
+#                             f"<strong>{file_info['name']}</strong> "
+#                             f"({file_info['size']:,} bytes)"
+#                             f"<br><code>{file_info['hash'][:16]}…</code>"
+#                             "</div>", unsafe_allow_html=True)
+#     else:
+#         st.info("No files processed yet.")
 
-with about_tab:
-    st.markdown("""
-    **Java TA Bot** leverages LangChain, GPT-4o, and ChromaDB to provide
-    accurate answers based on your course PDFs.
-    """)
+# if st.button("✖️ Hide processed files"):
+#     st.session_state.show_processed_files = False
+#     st.rerun()
 
-# Render the full chat history (user + assistant messages)
-# ------------------------------------------------------------------
-# ⇨ MOD ❻  Chat message rendering uses CSS classes
-# ------------------------------------------------------------------
+# with about_tab:
+#     st.markdown("""
+#     **Java TA Bot** leverages LangChain, GPT-4o, and ChromaDB to provide
+#     accurate answers based on your course PDFs.
+#     """)
+
+# Render chat history (user and assistant)
+# Chat message rendering uses CSS classes
 for msg in st.session_state.chat_history:
     role_class = "user-msg" if msg["role"] == "user" else "bot-msg"
     with st.chat_message(msg["role"]):
         st.markdown(f"<div class='{role_class}'>{msg['content']}</div>",
                     unsafe_allow_html=True)
 
-# Chat-style input field
+# Chat input
 # user_input = st.chat_input("Ask me anything...")
 
-# Process the user's question
+# Handle the user's question
 if user_input:
-    # Add user message to both LangChain memory and UI chat history
+    # Add user message to memory and UI
     st.session_state.memory.chat_memory.add_user_message(user_input)
     st.session_state.chat_history.append({"role": "user", "content": user_input})
 
-    # Call your RAG function
+    # Call the RAG function
     with st.spinner("Thinking..."):
         response = rag_answer2(user_input, collection, memory=st.session_state.memory, attachment_text=st.session_state.session_docs)
 
-    # Add assistant message to memory and UI
+    # Add assistant response to memory and UI
     st.session_state.memory.chat_memory.add_ai_message(response)
     st.session_state.chat_history.append({"role": "assistant", "content": response})
 
-    st.rerun()  # rerun to show the new messages
+    st.rerun()  # Rerun to display the new messages
