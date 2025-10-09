@@ -1,5 +1,4 @@
 """
-app.py
 This script implements a Streamlit application that serves as a chatbot for a Java TA (Teaching Assistant) system. 
 It allows users to upload PDF files, processes the content for visual analysis, and maintains a chat history 
 for user interactions. The application utilizes various libraries such as LangChain, ChromaDB, and OpenAI to 
@@ -18,7 +17,7 @@ import tempfile      # Save uploads for PyMuPDF
 import hashlib 
 
 # imports from other files
-from FE import styles, sidebar
+from frontend import styles, sidebar
 from helper import smart_chunk_content, extract_pages_optimized
 from rag_pipeline import rag_pipeline
 

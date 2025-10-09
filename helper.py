@@ -1,5 +1,4 @@
 """
-helper.py
 This script provides utility functions for processing PDF documents in the context of a Java TA Knowledge-Base Chatbot. 
 It includes functionalities to detect visual elements such as tables, images, and drawings within PDF pages, 
 extract structured text from tables, and compress images for efficient processing. 
@@ -17,7 +16,26 @@ from PIL import Image
 import io
 
 def detect_visual_elements(page):
-    """Detect if a page contains tables, diagrams, or other visual elements"""
+
+    """
+    Detects the presence of visual elements in a given page.
+    This function analyzes a page to identify the presence of tables, images, 
+    and vector drawings. It also calculates the text density to determine if 
+    the page is likely to contain diagrams based on the amount of text relative 
+    to the visual content.
+    Parameters:
+        page (object): The page object to analyze, which should provide methods 
+                       to find tables, get images, get drawings, and retrieve 
+                       text and its dimensions.
+    Returns:
+        tuple: A tuple containing:
+            - has_visual_content (bool): True if the page contains visual elements, 
+              False otherwise.
+            - num_tables (int): The number of tables found on the page.
+            - num_images (int): The number of images found on the page.
+            - num_drawings (int): The number of vector drawings found on the page.
+    """
+    
     # Look for tables
     table_finder = page.find_tables()
     tables = list(table_finder)  # Convert TableFinder to a list
@@ -36,7 +54,21 @@ def detect_visual_elements(page):
     return has_visual_content, len(tables), len(images), len(drawings)
 
 def extract_table_text(page):
-    """Extract tables as structured text"""
+
+    """
+    Extracts text from tables found on a given page and formats them as Markdown.
+    Args:
+        page (object): An object representing the page from which to extract tables.
+    Returns:
+        str: A string containing the Markdown representation of all extracted tables.
+        Each table is prefixed with 'TABLE:' and separated by newlines.
+    Notes:
+        - The function handles exceptions silently, continuing to process other tables
+          if an error occurs during extraction.
+        - The first row of each table is treated as the header, and the subsequent rows
+          are treated as data.
+    """
+    
     table_finder = page.find_tables()
     tables = list(table_finder)  # Convert TableFinder to a list
     table_texts = []
@@ -59,7 +91,21 @@ def extract_table_text(page):
     return "\n".join(table_texts)
 
 def compress_image(pix, max_size=(800, 600), quality=85):
-    """Compress image to reduce token usage"""
+
+    """
+    Compresses an image to a specified maximum size and quality.
+    Args:
+        pix (PIL.Image.Image): The input image in pixel format.
+        max_size (tuple): A tuple specifying the maximum width and height of the image (default is (800, 600)).
+        quality (int): The quality of the output JPEG image (default is 85).
+    Returns:
+        str: A base64 encoded string of the compressed JPEG image.
+    Notes:
+        - The function resizes the image if it exceeds the specified maximum dimensions.
+        - It converts images with transparency (RGBA, LA, P) to RGB before saving to JPEG.
+        - The output image is optimized for size while maintaining the specified quality.
+    """
+    
     img_bytes = pix.tobytes("png")
     img = Image.open(io.BytesIO(img_bytes))
     
@@ -79,7 +125,28 @@ def compress_image(pix, max_size=(800, 600), quality=85):
     return base64.b64encode(output.getvalue()).decode("utf-8")
 
 def analyze_visual_content_with_gpt4v(base64_image, client):
-    """Use GPT-4V to analyze visual content and convert to text description"""
+
+    """
+    Analyze visual content using GPT-4V and convert it to a text description.
+
+    Args:
+        base64_image (str): A base64 encoded string representing the image to be analyzed.
+        client (object): An instance of the client used to interact with the GPT-4V API.
+
+    Returns:
+        str: A detailed description of the visual content, including UML diagrams, code snippets, 
+             flowcharts, tables, mathematical formulas, and other relevant educational content 
+             related to Java programming. In case of an error, returns an error message.
+
+    Raises:
+        Exception: Catches and returns any exceptions that occur during the API call.
+
+    Notes:
+        - Ensure that the base64_image is properly formatted and valid.
+        - The client must be authenticated and configured to access the GPT-4V API.
+        - The response may vary based on the content of the image and the model's capabilities.
+    """
+
     try:
         response = client.chat.completions.create(
             model="gpt-4o",
@@ -90,15 +157,17 @@ def analyze_visual_content_with_gpt4v(base64_image, client):
                         {
                             "type": "text",
                             "text": """Analyze this image from a Java programming course document. Describe any:
-1. UML diagrams (class diagrams, sequence diagrams, etc.) - describe the classes, relationships, methods, and fields
-2. Code snippets or examples - transcribe the code exactly
-3. Flowcharts or algorithmic diagrams - describe the logic flow
-4. Tables with data - convert to markdown table format
-5. Mathematical formulas or expressions
-6. Any other educational content relevant to Java programming
+                                1. UML diagrams (class diagrams, sequence diagrams, etc.) - describe the classes,
+                                relationships, methods, and fields
+                                2. Code snippets or examples - transcribe the code exactly
+                                3. Flowcharts or algorithmic diagrams - describe the logic flow
+                                4. Tables with data - convert to markdown table format
+                                5. Matematical formulas or expressions
+                                6. Any other educational content relevant to Java programming
 
-Be precise and detailed in your description so it can be used as context for answering student questions."""
-                        },
+                                Be precise and detailed in your description so it can be used as context for answering
+                                student questions."""
+                                                        },
                         {
                             "type": "image_url",
                             "image_url": {
@@ -115,7 +184,24 @@ Be precise and detailed in your description so it can be used as context for ans
         return f"[Error analyzing visual content: {str(e)}]"
 
 def extract_pages_optimized(pdf_path):
-    """Extracts text + analyzes visual content efficiently"""
+
+    """
+    Extracts text and analyzes visual content from a PDF file efficiently.
+    Args:
+        pdf_path (str): The file path to the PDF document from which to extract content.
+    Returns:
+        list: A list of dictionaries, each containing:
+            - page (int): The page number (1-indexed).
+            - content (str): Combined text, structured tables, and visual elements description.
+            - has_visuals (bool): Indicates if the page contains significant visual elements.
+            - stats (str): A summary of the number of tables, images, and drawings on the page.
+    Notes:
+        - The function utilizes the PyMuPDF library (imported as fitz) to open and process the PDF.
+        - OpenAI's API is used for analyzing visual content, requiring an API key stored in environment variables.
+        - The function checks for significant visual elements and processes them only if certain conditions are met.
+        - The output is structured to provide a comprehensive overview of each page's content and visual elements.
+    """
+
     doc = fitz.open(pdf_path)
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     page_data = []
@@ -158,7 +244,26 @@ def extract_pages_optimized(pdf_path):
     return page_data
 
 def smart_chunk_content(page_data, max_chunk_size=4000):
-    """Break content into smart chunks that respect logical boundaries"""
+    
+    """
+    Splits the content of pages into smaller chunks based on a maximum chunk size.
+    Args:
+        page_data (list): A list of dictionaries, where each dictionary contains:
+            - "content" (str): The text content of the page.
+            - "page" (int): The page number.
+        max_chunk_size (int): The maximum size of each chunk in characters. Default is 4000.
+    Returns:
+        list: A list of dictionaries, each containing:
+            - "text" (str): The chunked text content.
+            - "metadata" (dict): A dictionary with:
+                - "page" (int): The page number from which the chunk was created.
+                - "chunk" (int): The chunk number for the respective page.
+    Notes:
+        - The function ensures that chunks do not exceed the specified maximum size.
+        - It attempts to keep visual elements together by splitting content at double newlines.
+        - If a section exceeds the maximum size, it creates a new chunk for that section.
+    """
+    
     chunks = []
     
     for page in page_data:

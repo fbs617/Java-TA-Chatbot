@@ -1,5 +1,4 @@
 """
-rag_pipeline.py
 This script implements a retrieval-augmented generation (RAG) pipeline for a Java TA Knowledge-Base Chatbot. 
 It utilizes OpenAI's embedding model to process user queries and retrieve relevant information from a collection 
 of documents. The `rag_pipeline` function embeds the user's question, queries a document collection for the 
@@ -15,6 +14,27 @@ from langsmith import traceable
 
 @traceable(name="RAG_Chatbot_Answer")
 def rag_pipeline(query, collection, memory, attachment_text="", embedding_model="text-embedding-3-small", k=5):
+
+    """
+    Processes a user's query by embedding it, retrieving relevant information from a document collection, and generating
+    a response using a language model. It maintains memory context and can handle user attachments to enhance the quality of the response.
+    Args:
+        query (str): The user's question or query to be processed.
+        collection (object): The document collection from which relevant information is retrieved.
+        memory (object): An object that maintains the memory context of the conversation.
+        attachment_text (str, optional): Additional text provided by the user for context. Defaults to an empty string.
+        embedding_model (str, optional): The model used for embedding the query. Defaults to "text-embedding-3-small".
+        k (int, optional): The number of top relevant chunks to retrieve. Defaults to 5.
+
+    Returns:
+        str: The generated response content from the language model based on the constructed prompt.
+
+    Notes:
+        - The function utilizes OpenAI's embedding model to process user queries and retrieve relevant information.
+        - It constructs a prompt that ensures the language model provides accurate, thorough, and pedagogical responses.
+        - The function handles user attachments and maintains memory context to enhance response quality.
+    """
+
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
     # Step 1: Embed the user's question
