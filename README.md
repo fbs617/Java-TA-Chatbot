@@ -5,6 +5,10 @@
 
 A Retrieval-Augmented Generation (RAG) chatbot designed to help students study Java and Object-Oriented Programming (OOP) topics. The application provides intelligent document processing, visual content analysis, and contextual question-answering using course PDFs and generated Q&A pairs.
 
+## 🎥 Video Demo Link: 
+
+https://youtu.be/cDILKAl2BuU
+
 ## 🚀 Features
 
 - **📚 RAG-powered Knowledge Base**: Index PDFs and generated Q&A into a persistent ChromaDB vector store
